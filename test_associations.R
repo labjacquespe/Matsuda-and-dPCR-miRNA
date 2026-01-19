@@ -200,8 +200,6 @@ colnames(correlations) = names(subset_list)
 rownames(correlations) = mir_list
 
 library(corrplot)
-#Greys = c('#FFFFFF', '#F0F0F0', '#D9D9D9', '#BDBDBD', '#969696', '#737373', '#525252', '#252525', '#000000')
 pdf(paste0(outdir, "/corrplot.pdf"), width=3.5, height=3.5)
-corrplot(abs(as.matrix(correlations)), tl.col="black", addCoef.col=T, method="color", col=COL1(Greys, 10), col.lim = c(0, 0.5), is.corr=F)
-#corrplot(abs(as.matrix(correlations)), tl.col="black", addCoef.col=T, method="color", col=Greys, col.lim = c(0, 0.5), is.corr=F)
+corrplot(abs(as.matrix(correlations)), tl.col="black", addCoef.col=T, method="color", col=COL1(Greys, 10)	, col.lim = c(0, 0.5), is.corr=F)
 dev.off()
