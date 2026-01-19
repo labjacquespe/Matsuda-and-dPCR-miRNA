@@ -4,10 +4,11 @@
 #======================================
 
 mir_list = c("miR.517a.3p","miR.524.5p","miR.1283","let.7b.3p")
-mir_colors = c("#f8766d","#00b0f6","#00bf7d","#e76bf3")
 hemolysis_list = c("N","1+","2+","3+")
 
 library(ggplot2)
+library(ggpubr)
+library(ggrepel)
 pd = position_dodge(0.9)
 
 
@@ -33,14 +34,8 @@ stack_data = function(df){
 		colnames(mir_df) = c("ID", "normalized", "CI_lower", "CI_upper", "miR")
 		mir_df = mir_df[, c("ID", "miR","normalized", "CI_lower", "CI_upper")]
 		new_df = rbind(new_df, mir_df)
-		#if(mir == mir_list[1]){
-		#	new_df = mir_df
-		#} else{
-		#	new_df = rbind(new_df, mir_df)
-		#}
 	}
-	# remove failed quantification
-	#new_df = subset(new_df, normalized!=0)
+	# remove failed quantification (some readings show 0)
 	new_df$normalized = ifelse(new_df$normalized==0, NA, new_df$normalized)
 
 	new_df$uid = paste0(new_df$ID, "_", new_df$miR) 
@@ -122,25 +117,29 @@ plot_rescued_data = function(df1, df2){
 	dev.off()
 }
 
-plot_raw_data = function(df, dataset, name){
+plot_raw_data = function(df, dataset, name, threshold_z_score=NA){
 	# long format
 	histograms = lapply(mir_list, function(mir){
 		ggplot(subset(df, miR==mir), aes(x=normalized)) + 
 			geom_histogram(bins=30) + 
 	 		xlab(paste0("Normalized levels ", mir)) + ylab("Samples")})
 
+
 	scatters = lapply(mir_list, function(mir){
 		subdf = subset(df, miR==mir)
+		CI_low = ifelse(dataset=="dpcr", subdf$CI_lower, NA)
+		CI_up = ifelse(dataset=="dpcr", subdf$CI_upper, NA)
+
 		ggplot(subdf, aes(x=as.character(ID), y=normalized, label=as.character(ID))) + 
-			geom_errorbar(aes(ymin=CI_lower, ymax=CI_upper), position=pd) + 
+			geom_errorbar(aes(ymin=CI_low, ymax=CI_up), position=pd) + 
 			geom_point(position=pd) + 
-	  		geom_text_repel(data=subset(subdf, scale(normalized)>3)) + 
+	  		geom_text_repel(data=subset(subdf, scale(normalized)>threshold_z_score)) + 
 			theme(legend.position="none", axis.text.x=element_blank(), axis.ticks.x=element_blank()) + 
 			labs(x="Samples", y=paste0("Normalized levels ", mir))})
 	
 	outliers = lapply(mir_list, function(mir){
 		subdf = subset(df, miR==mir)
-		subset(subdf, scale(normalized)>3)$ID
+		subset(subdf, scale(normalized)>threshold_z_score)$ID
 		})
 
 	pdf(paste0("plot/process_",dataset,".",name,".pdf"), width=5, height=10)
@@ -154,7 +153,7 @@ plot_raw_data = function(df, dataset, name){
 #======================================
 ### Prepare for associations
 #======================================
-prepare_for_association = function(df, phenotypes){
+prepare_for_association = function(df, phenotypes, timepoint_name){
 
  	# combine datafame with phenotypes
 	df = merge(df, phenotypes, by="ID", all.x=TRUE) 
@@ -165,6 +164,10 @@ prepare_for_association = function(df, phenotypes){
  	# remove samples without main outcome (matsuda)
 	complete_samples = na.omit(df[, c("ID", mir_list, "matsuda")])$ID
 	df = subset(df, ID %in% complete_samples)
+	
+	write.table(df, file=paste0(outdir,"/", timepoint_name, "_data.tsv"), 
+		sep="\t", row.names=FALSE, quote=FALSE)
+
 	return(df)
 }
 
@@ -220,8 +223,8 @@ run_association_tests = function(df, models, timepoint_name){
 	cat(" * Test to perform:", nrow(test_list), "\n")
 	
 	# Initialise rapport
-	report = as.data.frame(matrix(NA, nrow=nrow(test_list), ncol=9))
-	colnames(report) = c("miR","model","subset","nb","beta","se","pvalue","lowerCI","upperCI")
+	report = as.data.frame(matrix(NA, nrow=nrow(test_list), ncol=10))
+	colnames(report) = c("miR","outcome","model","subset","nb","beta","se","pvalue","lowerCI","upperCI")
 	
 	# for loop tests
 	for (i in 1:nrow(test_list)){
@@ -244,7 +247,7 @@ run_association_tests = function(df, models, timepoint_name){
 			stats = test_linear_reg(data, outcome, model, mir)
 		}
 		
-		report[i,] = c(mir, paste0(outcome,"~",model), subset_name, stats)
+		report[i,] = c(mir, outcome, model, subset_name, stats)
 	}
 	
 	# clean and write
@@ -279,39 +282,119 @@ test_linear_reg = function(df, outcome, model, mir){
 
 # Extract stats from model without interaction
 extract_reg = function(fit, outcome){
+	nb = length(fit$fitted.values)
 	complete_fit = summary(fit)
 
-	beta = round(complete_fit$coefficients[2,1], 3)
-	se = round(complete_fit$coefficients[2,2], 3)
+	beta = complete_fit$coefficients[2,1]
+	se = complete_fit$coefficients[2,2]
 	pvalue = format(signif(complete_fit$coefficients[2,4], 3), scientific = T)
-	lower = round(confint(fit)[2, 1], 3)
-	upper = round(confint(fit)[2, 2], 3)
+	lower = confint(fit)[2, 1]
+	upper = confint(fit)[2, 2]
 
 	# Exp for dichotomic outcomes
 	if (outcome %in% dichotomic_outcomes){
-		return(c(length(fit$fitted.values), exp(beta), exp(se), pvalue, exp(lower), exp(upper)))
+		return(c(nb, 
+			round(exp(beta), 3), 
+			round(exp(se), 3),
+			pvalue,
+			round(exp(lower), 3),
+			round(exp(upper), 3)))
 	} else {
-		return(c(length(fit$fitted.values), beta, se, pvalue, lower, upper))
+		return(c(nb,
+		    round(beta, 3), 
+		    round(se, 3), 
+		    pvalue,
+		    round(lower, 3), 
+		    round(upper, 3)))
 	}
 }
 
 # Extract stats from model with interaction
 extract_reg_interaction = function(fit, outcome){
+	nb = length(fit$fitted.values)
 	complete_fit = summary(fit)
 	
 	results = data.frame(complete_fit$coefficients)
 	idx_row = grep(":", rownames(results)) # interaction term	
 
-	beta = round(complete_fit$coefficients[idx_row,1], 3)
-	se = round(complete_fit$coefficients[idx_row,2], 3)
+	beta = complete_fit$coefficients[idx_row, 1]
+	se = complete_fit$coefficients[idx_row, 2]
 	pvalue = format(signif(complete_fit$coefficients[idx_row, 4], 3), scientific = T)
-	lower = round(confint(fit)[idx_row, 1], 3)
-	upper = round(confint(fit)[idx_row, 2], 3)
+	lower = confint(fit)[idx_row, 1]
+	upper = confint(fit)[idx_row, 2]
 	
 	# Exp for dichotomic outcomes
 	if (outcome %in% dichotomic_outcomes){
-		return(c(length(fit$fitted.values), exp(beta), exp(se), pvalue, exp(lower), exp(upper)))
+		return(c(nb, 
+			round(exp(beta), 3), 
+			round(exp(se), 3),
+			pvalue,
+			round(exp(lower), 3),
+			round(exp(upper), 3)))
 	} else {
-		return(c(length(fit$fitted.values), beta, se, pvalue, lower, upper))
+		return(c(nb,
+		    round(beta, 3), 
+		    round(se, 3), 
+		    pvalue,
+		    round(lower, 3), 
+		    round(upper, 3)))
 	}
 }
+
+
+
+create_forest_plot = function(df, outcome_name, dataset){
+	ref_line = ifelse(outcome_name %in% dichotomic_outcomes, 1, 0)
+	ymin = ifelse(outcome_name %in% dichotomic_outcomes, 0, -1)
+	ymax = ifelse(outcome_name %in% dichotomic_outcomes, 2, 1)
+	ylab = ifelse(outcome_name %in% dichotomic_outcomes, "OR", "Beta")
+
+	if (outcome_name %in% dichotomic_outcomes){
+		shape_values = if(outcome_name == "sex") {
+			c(4, 5, 15)
+		} else {
+			c(2, 1, 15)
+		}
+		names(shape_values) = if(outcome_name == "sex") {
+			c("GDM", "NGT","complete")
+		} else {
+			c("Male", "Female","complete")
+		}
+	} else {
+		shape_values = c(4,5,2,1,15)
+		names(shape_values) = subset_order
+	}
+
+
+	plots = list()
+	for (timepoint_name in timepoint_list){
+		subdf = subset(df, timepoint == timepoint_name)
+		plots[[timepoint_name]] = ggplot(data=subdf, aes(x=subset, y=as.numeric(beta))) + 
+			geom_point(size=2, aes(shape=subset, color=signif)) +
+			facet_wrap(~miR, strip.position="left", nrow=9) + 
+			geom_errorbar(aes(ymin=as.numeric(lowerCI), ymax=as.numeric(upperCI), color=signif), width=0.5, cex=0.5) + 
+			geom_hline(yintercept=ref_line, linetype=3) + 
+			ylim(ymin, ymax) + 
+			ylab(ylab) + 
+			theme_minimal() +
+			theme(legend.position="none", axis.text.y=element_blank(), axis.ticks.y=element_blank(), axis.text.x=element_text(face="bold"), axis.title=element_text(size=12,face="bold"), strip.text.y = element_text(hjust=0, vjust=1, angle=180, face="bold")) + 
+			coord_flip() +
+			scale_colour_manual(values=c("grey75","grey30","grey20","black")) + 
+			scale_shape_manual(values=shape_values) + 
+			ggtitle(timepoint_name)
+	}
+	return(plots)
+}
+
+
+create_boxplot = function(df, mir_name){
+	p = ggplot(df, aes(x=group, y=.data[[mir_name]], group=group, color=group)) +
+		 geom_boxplot(outlier.shape=NA) +
+		 geom_jitter(aes(shape=sex_factor), width=0.2) + 
+		 stat_summary(fun=mean, geom="point", shape=3, size=3, color="black") + 
+		 xlab("") + ylab(gsub("\\.", "-", mir_name)) + 
+		 theme(legend.position="none", axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1)) +
+		 ylim(-3, 3)
+	return(p)
+}
+

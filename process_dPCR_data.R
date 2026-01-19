@@ -26,6 +26,8 @@ input_file_rescued = "data/Donnees_Cohorte_Gen3G.REQUANTIFICATION_data.tsv"
 ### Global variables
 #======================================
 
+threshold_z_score = 4
+
 # import functions   
 if(!exists("format_dPCR_data", mode="function")) source("functions.R")
 
@@ -63,10 +65,12 @@ data_long = stacked_data[, c("ID", "miR", "normalized", "CI_lower", "CI_upper")]
 
 plot_rescued_data(initial_data, rescued_data)
 
-outliers = plot_raw_data(data_long, "dpcr","outliers")
-cat(" * Exclusion de", length(outliers), "outliers (|z|>3):\n")
+outliers = plot_raw_data(data_long, "dpcr","outliers", threshold_z_score)
+cat(" * Exclusion of", length(outliers), "outliers (|z|>",threshold_z_score,"):\n")
+
 cat("  ", paste(outliers, collapse=", "), "\n")
 data_long = subset(data_long, !ID %in% outliers)
+cat(" * including ",length(unique(data_long$ID)), "samples\n")
 
 o = plot_raw_data(data_long, "dpcr", "clean")
 

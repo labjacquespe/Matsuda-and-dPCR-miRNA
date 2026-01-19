@@ -23,9 +23,14 @@ count_df = read.csv("/project/rrg-jacquesp-ab/Gen3G_share/data/freeze/plasma/mir
 #======================================
 ### Global variables
 #======================================
+threshold_z_score = NA
 
 # import functions   
 if(!exists("format_dPCR_data", mode="function")) source("functions.R")
+
+#======================================
+### Data processing 
+#======================================
 
 # Normalisation TMM and CPM
 dataObject = edgeR::DGEList(counts=count_df)
@@ -47,7 +52,9 @@ write.table(data_wide, file="data/seq.clean.wide.tsv", sep="\t",row.names=F, quo
 data_long = reshape2::melt(data_wide, id.vars=c("ID"), variable.name="miR", value.name="normalized")
 write.table(data_long, file="data/seq.clean.long.tsv", sep="\t", row.names=F, quote=F)
 
-outliers = plot_raw_data(data_long, "seq","outliers")
-cat(" * Exclusion de", length(outliers), "outliers (|z|>3):\n")
-cat("  ", paste(outliers, collapse=", "), "\n")
-#data_long = subset(data_long, !ID %in% outliers)
+outliers = plot_raw_data(data_long, "seq","outliers", threshold_z_score)
+if (!is.na(threshold_z_score)) {
+	cat(" * Exclusion de", length(outliers), "outliers (|z|>",threshold_z_score,"):\n")
+	cat("  ", paste(outliers, collapse=", "), "\n")	
+	#data_long = subset(data_long, !ID %in% outliers)
+} 
