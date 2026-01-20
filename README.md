@@ -1,11 +1,21 @@
 
+To use the scripts, you will need a "data/" directory including dPCR data. 
+
+
+### Process dPCR data 
+
 ```bash
-Rscript  ~/def_link/extract_variables.R data/query.txt data/traits.tsv data/Gen3G_id_list.txt
+Rscript process_dPCR_data.R
+```
 
-Rscript explore_phenotype.R 
-Rscript run_analysis.R quantification/alldata.tsv main_results_non_missing_scale T0
-Rscript mirseq_analysis.R data/mirseq_plasma.cpm.tsv main_results_non_missing_scale/mirnaseq_cpm
+### Process sequencing data  
 
-Rscript forest_plot.R 
+```bash
+Rscript process_seq_data.R
+```
 
+### Run all associations and produce forestplots and boxplots.
+
+```bash
+Rscript test_associations.R <outdir>
 ```
