@@ -2,20 +2,22 @@
 ### Association testing 
 ### by F. White
 
-# Usage: Rscript test_associations.R <outdir>
+# Usage: Rscript test_associations.R <outdir> <indir>
 
 #======================================
 ### I/O
 #======================================
-
-file_T1 = "data/seq.clean.wide.tsv"
-file_T2 = "data/dpcr.clean.wide.tsv"
-file_hemolysis = "data/dpcr.hemolysis.tsv"
-file_phenotypes = "data/phenotypes.tsv"
-
 args = commandArgs(trailingOnly=TRUE)
 outdir = args[1]
+indir = args[2]
+
+if (is.na(indir)) indir = "data"
 if (!dir.exists(outdir)) dir.create(outdir)
+
+file_phenotypes = "data/phenotypes.tsv"
+file_T1 = "data/seq.clean.wide.tsv"
+file_hemolysis = paste0(indir,"/dpcr.hemolysis.tsv")
+file_T2 = paste0(indir,"/dpcr.clean.wide.tsv")
 
 #======================================
 ### Global variables
@@ -25,7 +27,7 @@ if (!dir.exists(outdir)) dir.create(outdir)
 if(!exists("format_dPCR_data", mode="function")) source("functions.R")
 
 outcomes = c("sex", "GDM", "matsuda", "birthweight", "placental_weight",
-	  "insulin_delivery", "c_peptide_delivery")
+	  "insulin_delivery", "c_peptide_delivery", "glucose_V1", "glucose_V2")
 dichotomic_outcomes = c("GDM", "sex")
 subset_order = c("GDM","NGT","Male","Female","complete")
 timepoint_list = c("T1 (complete)", "T1 (overlap)", "T2")
@@ -43,10 +45,6 @@ if(!file.exists(paste0(outdir,"/T2_associations.tsv"))) {
 	sample_T1 = intersect(full_T1$ID, hemo$ID)
 	T1 = subset(full_T1, ID %in% sample_T1)
 
-	cat(" * number of samples at T1 (full): ", nrow(full_T1),"\n")
-	cat(" * number of samples at T1 (overlap): ", nrow(T1),"\n")
-	cat(" * number of samples at T2: ", nrow(T2),"\n")
-
 	#======================================
 	# Prepare phenotypes
 	#======================================
@@ -60,6 +58,9 @@ if(!file.exists(paste0(outdir,"/T2_associations.tsv"))) {
 	phenotypes$insulin_delivery = scale(log2(as.numeric(phenotypes$insulin_delivery)))
 	phenotypes$c_peptide_delivery = scale(sqrt(as.numeric(phenotypes$c_peptide_delivery)))
 
+	phenotypes$glucose_V1 = scale(log2(as.numeric(phenotypes$glucose_V1)))
+	phenotypes$glucose_V2 = scale(log2(as.numeric(phenotypes$glucose_V2)))
+
 	# remove outliers (|z-score| > 4)
 	phenotypes$insulin_delivery = ifelse(abs(phenotypes$insulin_delivery) > 4, NA, phenotypes$insulin_delivery)
 	phenotypes$c_peptide_delivery = ifelse(abs(phenotypes$c_peptide_delivery) > 4, NA, phenotypes$c_peptide_delivery)
@@ -69,7 +70,7 @@ if(!file.exists(paste0(outdir,"/T2_associations.tsv"))) {
 	full_T1 = prepare_for_association(full_T1, phenotypes, "full_T1")
 	T1 = prepare_for_association(T1, phenotypes, "T1")
 	T2 = prepare_for_association(T2, phenotypes, "T2")
-	
+
 	hemo$hemolysis = as.numeric(factor(hemo$hemolysis, levels = hemolysis_list))
 	T2 = merge(hemo, T2, by="ID", all=TRUE)
 	
@@ -118,7 +119,9 @@ outcome_labels = c(sex = "Sex",
 	birthweight = "Birthweight",
 	placental_weight = "Placental weight",
 	insulin_delivery = "Insulin (delivery)",
-	c_peptide_delivery = "C-peptide (delivery)")
+	c_peptide_delivery = "C-peptide (delivery)",
+	glucose_V1="Glucose T1 (50g)",
+	glucose_V2="Glucose T2 (fasting)")
 
 full_T1_report$timepoint = "T1 (complete)"
 T1_report$timepoint = "T1 (overlap)"
@@ -135,7 +138,7 @@ all_data$signif = ifelse(all_data$pvalue < 0.01, "**", all_data$signif)
 all_data$signif = ifelse(all_data$pvalue < 0.001, "***", all_data$signif)
 all_data$signif = factor(all_data$signif, levels = c("", "*", "**", "***"))
 
-pdf(paste0(outdir,"/forest_plots.pdf"), height=7, width=9)
+pdf(paste0(outdir,"/forest_plots.pdf"), height=6, width=8.5)
 for (outcome_name in outcomes){
 
 	df = subset(all_data, outcome == outcome_name)	
@@ -164,7 +167,7 @@ all_quantification$GDM_factor = ifelse(all_quantification$GDM==0, "NGT","GDM")
 all_quantification$group = paste0(all_quantification$GDM_factor,"_",all_quantification$sex_factor)
 all_quantification$group = factor(all_quantification$group, levels=c("NGT_M", "GDM_M", "NGT_F", "GDM_F"))
 
-pdf(paste0(outdir,"/boxplots.pdf"), height=4, width=9)
+pdf(paste0(outdir,"/boxplots.pdf"), height=3.5, width=7)
 for (timepoint_name in timepoint_list){
 	
 	plots = lapply(mir_list, function(mir){
@@ -189,7 +192,7 @@ male_df = subset(wide_quant, sex == 0)
 female_df = subset(wide_quant, sex == 1)
 
 #correlations = list()
-subset_list = list(complete=wide_quant, NGT=NGT_df, GDM=GDM_df, Male=male_df, Female=female_df)
+subset_list = list(complete=wide_quant, Female=female_df, Male=male_df, NGT=NGT_df, GDM=GDM_df)
 correlations = lapply(subset_list, function(df){
 	M = cor(as.matrix(df[, grep("T1|T2", colnames(df))]))
 	diag(M[grep("T2",rownames(M)), grep("T1", colnames(M))])
@@ -198,8 +201,11 @@ correlations = lapply(subset_list, function(df){
 correlations = data.frame(correlations)
 colnames(correlations) = names(subset_list)
 rownames(correlations) = mir_list
+print(t(correlations))
 
-library(corrplot)
-pdf(paste0(outdir, "/corrplot.pdf"), width=3.5, height=3.5)
-corrplot(abs(as.matrix(correlations)), tl.col="black", addCoef.col=T, method="color", col=COL1(Greys, 10)	, col.lim = c(0, 0.5), is.corr=F)
-dev.off()
+if(require(corrplot)){
+	pdf(paste0(outdir, "/corrplot.pdf"), width=3.5, height=3.5)
+	corrplot(abs(as.matrix(correlations)), tl.col="black", addCoef.col=T, method="color", col.lim = c(0, 0.5), is.corr=F)
+	#corrplot(abs(as.matrix(correlations)), tl.col="black", addCoef.col=T, method="color", col=COL1(Greys, 10)	, col.lim = c(0, 0.5), is.corr=F)
+	dev.off()
+}

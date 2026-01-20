@@ -6,7 +6,7 @@
 #   the miRNA control cel-miR-39-3p in plasma samples
 #   collected during OGTT.
 
-# Usage: Rscript process_dPCR_data.R 
+# Usage: Rscript process_dPCR_data.R <outdir>
 # Description:
 # - The script process_dPCR_data.R is a script to compute CI in dPCR data.
 # - The script also combine the samples quantified two times and keep
@@ -19,6 +19,11 @@ library(reshape2)
 ### I/O
 #======================================
 
+args = commandArgs(trailingOnly=TRUE)
+outdir = args[1]
+if (is.na(outdir)) outdir = "data"
+if (!dir.exists(outdir)) dir.create(outdir)
+
 input_file_original = "data/Donnees_Cohorte_Gen3G.ORIGINAL_data.tsv"
 input_file_rescued = "data/Donnees_Cohorte_Gen3G.REQUANTIFICATION_data.tsv"
 
@@ -26,7 +31,7 @@ input_file_rescued = "data/Donnees_Cohorte_Gen3G.REQUANTIFICATION_data.tsv"
 ### Global variables
 #======================================
 
-threshold_z_score = 4
+threshold_z_score = 3.5
 
 # import functions   
 if(!exists("format_dPCR_data", mode="function")) source("functions.R")
@@ -40,7 +45,7 @@ rescued_data = format_dPCR_data(input_file_rescued)
 
 # save hemolysis info
 write.table(initial_data[, c("ID", "hemolysis")],
-	file="data/dpcr.hemolysis.tsv", sep="\t", row.names=F, quote=F)
+	file=paste0(outdir,"/dpcr.hemolysis.tsv"), sep="\t", row.names=F, quote=F)
 
 # convert to long format
 stacked_initial = stack_data(initial_data)
@@ -87,13 +92,13 @@ data_long$CI_upper = sqrt(data_long$CI_upper)
 data_wide = reshape2::dcast(data_long, ID~miR, value.var="normalized")
 data_wide = data_wide[, c("ID", mir_list)]
 
-write.table(data_long, file="data/dpcr.clean.long.tsv",
+write.table(data_long, file=paste0(outdir,"/dpcr.clean.long.tsv"),
 	sep="\t", row.names=F, quote=F)
 
-write.table(data_wide, file="data/dpcr.clean.wide.tsv",
+write.table(data_wide, file=paste0(outdir,"/dpcr.clean.wide.tsv"),
 	sep="\t", row.names=F, quote=F)
 
 cat(" * Données sauvegardées:\n")
-cat("   - data/dpcr.clean.long.tsv\n")
-cat("   - data/dpcr.clean.wide.tsv\n")
+cat("   - ",outdir,"/dpcr.clean.long.tsv\n")
+cat("   - ",outdir,"/dpcr.clean.wide.tsv\n")
 

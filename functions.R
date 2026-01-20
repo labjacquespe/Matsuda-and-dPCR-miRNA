@@ -156,7 +156,7 @@ plot_raw_data = function(df, dataset, name, threshold_z_score=NA){
 prepare_for_association = function(df, phenotypes, timepoint_name){
 
  	# combine datafame with phenotypes
-	df = merge(df, phenotypes, by="ID", all.x=TRUE) 
+	df = merge(df, phenotypes, by="ID", all.x=TRUE)
 
  	# z-score miRNA levels (scale function scales the columns)
 	df[, mir_list] = scale(df[, mir_list])
@@ -164,6 +164,7 @@ prepare_for_association = function(df, phenotypes, timepoint_name){
  	# remove samples without main outcome (matsuda)
 	complete_samples = na.omit(df[, c("ID", mir_list, "matsuda")])$ID
 	df = subset(df, ID %in% complete_samples)
+	cat(" * samples included in ",timepoint_name, ": ", length(complete_samples),"\n")
 	
 	write.table(df, file=paste0(outdir,"/", timepoint_name, "_data.tsv"), 
 		sep="\t", row.names=FALSE, quote=FALSE)
@@ -225,7 +226,6 @@ run_association_tests = function(df, models, timepoint_name){
 	# Initialise rapport
 	report = as.data.frame(matrix(NA, nrow=nrow(test_list), ncol=10))
 	colnames(report) = c("miR","outcome","model","subset","nb","beta","se","pvalue","lowerCI","upperCI")
-	
 	# for loop tests
 	for (i in 1:nrow(test_list)){
 		mir = test_list[i, "mirna"]
@@ -364,21 +364,22 @@ create_forest_plot = function(df, outcome_name, dataset){
 		shape_values = c(4,5,2,1,15)
 		names(shape_values) = subset_order
 	}
-
-
 	plots = list()
 	for (timepoint_name in timepoint_list){
 		subdf = subset(df, timepoint == timepoint_name)
+		subdf$signif = factor(subdf$signif, levels = c("", "*", "**", "***"))
 		plots[[timepoint_name]] = ggplot(data=subdf, aes(x=subset, y=as.numeric(beta))) + 
 			geom_point(size=2, aes(shape=subset, color=signif)) +
 			facet_wrap(~miR, strip.position="left", nrow=9) + 
 			geom_errorbar(aes(ymin=as.numeric(lowerCI), ymax=as.numeric(upperCI), color=signif), width=0.5, cex=0.5) + 
-			geom_hline(yintercept=ref_line, linetype=3) + 
+			geom_hline(yintercept=ref_line, linetype=2) + 
 			ylim(ymin, ymax) + 
 			ylab(ylab) + 
-			theme_minimal() +
-			theme(legend.position="none", axis.text.y=element_blank(), axis.ticks.y=element_blank(), axis.text.x=element_text(face="bold"), axis.title=element_text(size=12,face="bold"), strip.text.y = element_text(hjust=0, vjust=1, angle=180, face="bold")) + 
+			xlab("")+
+			theme_light() +
+			theme(legend.position="none", axis.text.y=element_blank(), axis.ticks.y=element_blank(), axis.ticks.x=element_blank(), axis.text.x=element_text(face="bold"), axis.title=element_text(size=12,face="bold"), strip.text.y = element_text(hjust=0, vjust=1, angle=180, face="bold"),  panel.grid.major.y=element_blank(), panel.grid.minor.y=element_blank()) + 
 			coord_flip() +
+			geom_vline(xintercept=c(2.5, 4.5), linetype=3) +
 			scale_colour_manual(values=c("grey75","grey30","grey20","black")) + 
 			scale_shape_manual(values=shape_values) + 
 			ggtitle(timepoint_name)
@@ -388,13 +389,17 @@ create_forest_plot = function(df, outcome_name, dataset){
 
 
 create_boxplot = function(df, mir_name){
+	colour_values = c("#0088aa", "#3caaff", "#ff5555", "#ff8080")
+	names(colour_values) = c("NGT_M", "GDM_M","NGT_F", "GDM_F")
 	p = ggplot(df, aes(x=group, y=.data[[mir_name]], group=group, color=group)) +
 		 geom_boxplot(outlier.shape=NA) +
 		 geom_jitter(aes(shape=sex_factor), width=0.2) + 
 		 stat_summary(fun=mean, geom="point", shape=3, size=3, color="black") + 
 		 xlab("") + ylab(gsub("\\.", "-", mir_name)) + 
-		 theme(legend.position="none", axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1)) +
-		 ylim(-3, 3)
+		 theme_light() +
+		 theme(legend.position="none", axis.text.x=element_blank(), axis.ticks.x=element_blank()) +
+		 ylim(-3, 3) +
+		 scale_colour_manual(values=colour_values)
 	return(p)
 }
 

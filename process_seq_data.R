@@ -6,7 +6,7 @@
 #   As a lookup with the dPCR analysis, the 4 miRNA of interest need to 
 #   be extracted from the dataset.
 
-# Usage: Rscript process_seq_data.R 
+# Usage: Rscript process_seq_data.R <outdir>
 # Description:
 # - library size normalization
 # - CPM 
@@ -18,6 +18,11 @@ library(reshape2)
 #======================================
 ### I/O
 #======================================
+args = commandArgs(trailingOnly=TRUE)
+outdir = args[1]
+if (is.na(outdir)) outdir = "data"
+if (!dir.exists(outdir)) dir.create(outdir)
+
 count_df = read.csv("/project/rrg-jacquesp-ab/Gen3G_share/data/freeze/plasma/mirnaseq_v1/exceRpt_miRNA_ReadCounts.mirbase21.clean.gct", sep="\t", check.names=F, row.names=1)
 
 #======================================
@@ -47,10 +52,10 @@ colnames(data) = gsub("miR.517a.3p.miR.517b.3p", "miR.517a.3p", colnames(data))
 
 # save data
 data_wide = cbind(ID=rownames(data), data)
-write.table(data_wide, file="data/seq.clean.wide.tsv", sep="\t",row.names=F, quote=F)
+write.table(data_wide, file=paste0(outdir,"/seq.clean.wide.tsv"), sep="\t",row.names=F, quote=F)
 
 data_long = reshape2::melt(data_wide, id.vars=c("ID"), variable.name="miR", value.name="normalized")
-write.table(data_long, file="data/seq.clean.long.tsv", sep="\t", row.names=F, quote=F)
+write.table(data_long, file=paste0(outdir,"/seq.clean.long.tsv"), sep="\t", row.names=F, quote=F)
 
 outliers = plot_raw_data(data_long, "seq","outliers", threshold_z_score)
 if (!is.na(threshold_z_score)) {
