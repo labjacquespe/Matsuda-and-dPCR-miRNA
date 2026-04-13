@@ -1,8 +1,13 @@
-### NIH project - Placental miRNA
-### Association testing 
+### Matsuda index and Placental miRNA 
+# 		measured in plasma at first (T1) 
+#			and second (T2) trimester of pregnancy  
+
 ### by F. White
 
-# Usage: Rscript test_associations_with_public_file.R <outdir> 
+# Usage: Rscript test_associations_from_supp <outdir> 
+
+# The script use the published file from supplementary
+# 	to replicate the study results.
 
 library(data.table)
 library(ggplot2)
