@@ -15,7 +15,7 @@ outdir = args[1]
 
 input_file = "data/NIH miRNA project - Raw data.tsv"
 
-data = fread(input_file, skip = 1)[, -1]
+data = fread(input_file, skip = 1)
 data = data[, c(1:5, 14:17, 18:27)]
 
 #======================================
