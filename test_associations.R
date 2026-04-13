@@ -27,7 +27,8 @@ file_T2 = paste0(indir,"/dpcr.clean.wide.tsv")
 if(!exists("format_dPCR_data", mode="function")) source("functions.R")
 
 outcomes = c("sex", "GDM", "matsuda", "birthweight", "placental_weight",
-	  "insulin_delivery", "c_peptide_delivery", "glucose_V1", "glucose_V2")
+	  "insulin_delivery", "c_peptide_delivery",
+	   "glucose_V1", "Insuline_V1", "glucose_V2", "Stumvoll", "PIP")
 dichotomic_outcomes = c("GDM", "sex")
 subset_order = c("GDM","NGT","Male","Female","complete")
 timepoint_list = c("T1 (complete)", "T1 (overlap)", "T2")
@@ -36,13 +37,12 @@ timepoint_list = c("T1 (complete)", "T1 (overlap)", "T2")
 #======================================
 # run analysis only if output does not already exist
 if(!file.exists(paste0(outdir,"/T2_associations.tsv"))) {
-
 	full_T1 = read.csv(file_T1, sep="\t")
 	T2 = read.csv(file_T2, sep="\t")
 
 	# T1 samples overlapping T2 samples (using hemolysis list because table T2 is missing the outliers)
 	hemo = read.csv(file_hemolysis, sep="\t")
-	sample_T1 = intersect(full_T1$ID, hemo$ID)
+	sample_T1 = intersect(full_T1$ID, T2$ID)
 	T1 = subset(full_T1, ID %in% sample_T1)
 
 	#======================================
@@ -51,17 +51,22 @@ if(!file.exists(paste0(outdir,"/T2_associations.tsv"))) {
 	phenotypes = read.csv(file_phenotypes, sep="\t")
 
 	# normal distribution
-	phenotypes$BMI_V1 = log2(as.numeric(phenotypes$BMI_V1))
+	phenotypes$BMI_V1 = scale(log2(as.numeric(phenotypes$BMI_V1)))
 	phenotypes$matsuda = scale(log2(as.numeric(phenotypes$matsuda)))
 	phenotypes$birthweight = scale(as.numeric(phenotypes$birthweight)^2)
 	phenotypes$placental_weight = scale(sqrt(as.numeric(phenotypes$placental_weight)))
 	phenotypes$insulin_delivery = scale(log2(as.numeric(phenotypes$insulin_delivery)))
 	phenotypes$c_peptide_delivery = scale(sqrt(as.numeric(phenotypes$c_peptide_delivery)))
-
+	phenotypes$Stumvoll = scale(log2(as.numeric(phenotypes$Stumvoll)))
+	phenotypes$PIP = scale(log2(as.numeric(phenotypes$PIP)))
 	phenotypes$glucose_V1 = scale(log2(as.numeric(phenotypes$glucose_V1)))
 	phenotypes$glucose_V2 = scale(log2(as.numeric(phenotypes$glucose_V2)))
+	phenotypes$Insuline_V1 = scale(log2(as.numeric(phenotypes$Insuline_V1)))
 
 	# remove outliers (|z-score| > 4)
+	print(subset(phenotypes, abs(insulin_delivery)>4)$ID)
+	print(subset(phenotypes, abs(c_peptide_delivery)>4)$ID)
+	stop()
 	phenotypes$insulin_delivery = ifelse(abs(phenotypes$insulin_delivery) > 4, NA, phenotypes$insulin_delivery)
 	phenotypes$c_peptide_delivery = ifelse(abs(phenotypes$c_peptide_delivery) > 4, NA, phenotypes$c_peptide_delivery)
 
@@ -121,12 +126,18 @@ outcome_labels = c(sex = "Sex",
 	insulin_delivery = "Insulin (delivery)",
 	c_peptide_delivery = "C-peptide (delivery)",
 	glucose_V1="Glucose T1 (50g)",
-	glucose_V2="Glucose T2 (fasting)")
+	Insuline_V1="Insuline T1",
+	glucose_V2="Glucose T2 (fasting)",
+	Stumvoll="Stumvoll index",
+	PIP="PIP index")
 
 full_T1_report$timepoint = "T1 (complete)"
 T1_report$timepoint = "T1 (overlap)"
 T2_report$timepoint = "T2"
 all_data = rbind(full_T1_report, T1_report, T2_report)
+all_data$beta = as.numeric(all_data$beta)
+all_data$lowerCI = as.numeric(all_data$lowerCI)
+all_data$upperCI = as.numeric(all_data$upperCI)
 
 all_data$miR = factor(all_data$miR, levels=mir_list)
 all_data$timepoint = factor(all_data$timepoint, levels=timepoint_list)

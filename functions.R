@@ -43,6 +43,7 @@ stack_data = function(df){
 	return(new_df)
 }
 
+
 # Keep value with lower absolute CI
 keep_lower_range = function(df, value){
 	result = df[, paste0(value,".x")]  # Default : batch 1
@@ -90,9 +91,9 @@ format_dPCR_data <- function(input_file) {
 	
 	data$hemolysis = factor(data$hemolysis, levels=hemolysis_list)
 
-
 	return(data)
 }
+
 
 # compare normalized levels and CI between batch for samples quantified twice
 plot_rescued_data = function(df1, df2){
@@ -127,10 +128,10 @@ plot_raw_data = function(df, dataset, name, threshold_z_score=NA){
 
 	scatters = lapply(mir_list, function(mir){
 		subdf = subset(df, miR==mir)
-		CI_low = ifelse(dataset=="dpcr", subdf$CI_lower, NA)
-		CI_up = ifelse(dataset=="dpcr", subdf$CI_upper, NA)
+		CI_low = ifelse(dataset=="dpcr", subdf$CI_lower, subdf$normalized)
+		CI_up = ifelse(dataset=="dpcr", subdf$CI_upper, subdf$normalized)
 
-		ggplot(subdf, aes(x=as.character(ID), y=normalized, label=as.character(ID))) + 
+		ggplot(subdf, aes(x=as.character(ID), y=as.numeric(normalized), label=as.character(ID))) + 
 			geom_errorbar(aes(ymin=CI_low, ymax=CI_up), position=pd) + 
 			geom_point(position=pd) + 
 	  		geom_text_repel(data=subset(subdf, scale(normalized)>threshold_z_score)) + 
@@ -139,14 +140,14 @@ plot_raw_data = function(df, dataset, name, threshold_z_score=NA){
 	
 	outliers = lapply(mir_list, function(mir){
 		subdf = subset(df, miR==mir)
-		subset(subdf, scale(normalized)>threshold_z_score)$ID
+		subset(subdf, scale(normalized)>threshold_z_score)[, c("ID", "miR")]
 		})
 
 	pdf(paste0("plot/process_",dataset,".",name,".pdf"), width=5, height=10)
 	print(ggarrange(plotlist=histograms, nrow=4, ncol=1))
 	print(ggarrange(plotlist=scatters, nrow=4, ncol=1))
 	dev.off()
-	return(unique(unlist(outliers)))
+	return(outliers)
 }
 
 
@@ -162,7 +163,8 @@ prepare_for_association = function(df, phenotypes, timepoint_name){
 	df[, mir_list] = scale(df[, mir_list])
 
  	# remove samples without main outcome (matsuda)
-	complete_samples = na.omit(df[, c("ID", mir_list, "matsuda")])$ID
+	#complete_samples = na.omit(df[, c("ID", mir_list, "matsuda")])$ID
+	complete_samples = na.omit(df[, c("ID", "matsuda")])$ID
 	df = subset(df, ID %in% complete_samples)
 	cat(" * samples included in ",timepoint_name, ": ", length(complete_samples),"\n")
 	

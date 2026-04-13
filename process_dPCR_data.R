@@ -31,7 +31,7 @@ input_file_rescued = "data/Donnees_Cohorte_Gen3G.REQUANTIFICATION_data.tsv"
 ### Global variables
 #======================================
 
-threshold_z_score = 3.5
+threshold_z_score = 5
 
 # import functions   
 if(!exists("format_dPCR_data", mode="function")) source("functions.R")
@@ -72,9 +72,14 @@ plot_rescued_data(initial_data, rescued_data)
 
 outliers = plot_raw_data(data_long, "dpcr","outliers", threshold_z_score)
 cat(" * Exclusion of", length(outliers), "outliers (|z|>",threshold_z_score,"):\n")
+print(nrow(data_long))
+for(o in outliers ){
+	id = unlist(o[1])
+	mir = unlist(o[2])
 
-cat("  ", paste(outliers, collapse=", "), "\n")
-data_long = subset(data_long, !ID %in% outliers)
+	cat("  removing ", id, " in miR ", mir, "\n")
+	data_long = data_long[!(data_long$ID == id & data_long$miR == mir), ]
+}
 cat(" * including ",length(unique(data_long$ID)), "samples\n")
 
 o = plot_raw_data(data_long, "dpcr", "clean")
@@ -82,6 +87,11 @@ o = plot_raw_data(data_long, "dpcr", "clean")
 #=============================================================================
 ### Write outputs
 #=============================================================================
+
+data_wide = reshape2::dcast(data_long, ID~miR, value.var="normalized")
+data_wide = data_wide[, c("ID", mir_list)]
+write.table(data_wide, file=paste0(outdir,"/dpcr.clean.wide.raw.tsv"),
+	sep="\t", row.names=F, quote=F)
 
 cat(" * applying square root transformation to get normal distribution\n")
 
@@ -91,6 +101,11 @@ data_long$CI_upper = sqrt(data_long$CI_upper)
 
 data_wide = reshape2::dcast(data_long, ID~miR, value.var="normalized")
 data_wide = data_wide[, c("ID", mir_list)]
+
+for (m in mir_list){
+	shap = shapiro.test(data_wide[, m])
+	cat(" * ", m, " shapiro p: ", signif(shap$p.value,2), "\n")
+}
 
 write.table(data_long, file=paste0(outdir,"/dpcr.clean.long.tsv"),
 	sep="\t", row.names=F, quote=F)
