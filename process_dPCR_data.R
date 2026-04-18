@@ -72,12 +72,11 @@ plot_rescued_data(initial_data, rescued_data)
 
 outliers = plot_raw_data(data_long, "dpcr","outliers", threshold_z_score)
 cat(" * Exclusion of", length(outliers), "outliers (|z|>",threshold_z_score,"):\n")
-print(nrow(data_long))
 for(o in outliers ){
 	id = unlist(o[1])
 	mir = unlist(o[2])
 
-	cat("  removing ", id, " in miR ", mir, "\n")
+	cat("  removing ", paste0("#",id) , " in miR ", mir, "\n")
 	data_long = data_long[!(data_long$ID == id & data_long$miR == mir), ]
 }
 cat(" * including ",length(unique(data_long$ID)), "samples\n")
@@ -113,7 +112,7 @@ write.table(data_long, file=paste0(outdir,"/dpcr.clean.long.tsv"),
 write.table(data_wide, file=paste0(outdir,"/dpcr.clean.wide.tsv"),
 	sep="\t", row.names=F, quote=F)
 
-cat(" * Données sauvegardées:\n")
+cat(" * Save data files:\n")
 cat("   - ",outdir,"/dpcr.clean.long.tsv\n")
 cat("   - ",outdir,"/dpcr.clean.wide.tsv\n")
 

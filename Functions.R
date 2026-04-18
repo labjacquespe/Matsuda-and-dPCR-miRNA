@@ -3,17 +3,16 @@
 ### Global variables
 #======================================
 
-mir_list = c("miR.517a.3p","miR.524.5p","miR.1283","let.7b.3p")
-hemolysis_list = c("N","1+","2+","3+")
-
 library(ggplot2)
 library(ggpubr)
 library(ggrepel)
 pd = position_dodge(0.9)
 
+mir_list = c("miR.517a.3p","miR.524.5p","miR.1283","let.7b.3p")
+hemolysis_list = c("N","1+","2+","3+","4+","5+")
 
 #======================================
-### Global functions
+### Utility functions
 #======================================
 
 # Convert percent to intervals (divided by 2)
@@ -89,8 +88,8 @@ format_dPCR_data <- function(input_file) {
 		paste0("CI_upper_", mir_list)
 		)]
 	
-	data$hemolysis = factor(data$hemolysis, levels=hemolysis_list)
-
+	data$hemolysis = as.numeric(factor(data$hemolysis, levels=hemolysis_list)) - 1
+	
 	return(data)
 }
 
@@ -150,7 +149,6 @@ plot_raw_data = function(df, dataset, name, threshold_z_score=NA){
 	return(outliers)
 }
 
-
 #======================================
 ### Prepare for associations
 #======================================
@@ -163,7 +161,6 @@ prepare_for_association = function(df, phenotypes, timepoint_name){
 	df[, mir_list] = scale(df[, mir_list])
 
  	# remove samples without main outcome (matsuda)
-	#complete_samples = na.omit(df[, c("ID", mir_list, "matsuda")])$ID
 	complete_samples = na.omit(df[, c("ID", "matsuda")])$ID
 	df = subset(df, ID %in% complete_samples)
 	cat(" * samples included in ",timepoint_name, ": ", length(complete_samples),"\n")
@@ -174,202 +171,125 @@ prepare_for_association = function(df, phenotypes, timepoint_name){
 	return(df)
 }
 
-# Filter dataframe according to the provided subset
-get_subset = function(df, subset_name, outcome, model){
-	can_be_tested = TRUE
-	# Exclusion
-	if (outcome == "GDM" & grepl("\\*GDM", model)) can_be_tested = FALSE
-	if (outcome == "sex" & grepl("\\*sex", model)) can_be_tested = FALSE
-
-	if(subset_name == "Male"){
-		df = subset(df, sex==0)
-		if (grepl("\\*sex", model)) can_be_tested = FALSE
-	} else if (subset_name == "Female"){
-		df = subset(df, sex==1)
-		if (grepl("\\*sex", model)) can_be_tested = FALSE
-	} else if (subset_name == "NGT"){
-		df = subset(df, GDM==0)
-		if (grepl("\\*GDM", model)) can_be_tested = FALSE
-	} else if (subset_name == "GDM"){
-		df = subset(df, GDM==1)
-		if (grepl("\\*GDM", model)) can_be_tested = FALSE
-	}
-
-	if (subset_name %in% c("Male","Female") & outcome == "sex") can_be_tested = FALSE
-	if (subset_name %in% c("NGT","GDM") & outcome == "GDM") can_be_tested = FALSE
-	
-	return(list(df, can_be_tested))	
-}
-
 #======================================
 ### Regression
 #======================================
 
+test_associations = function(dt, models, timepoint_name, sample_list){
 
-run_association_tests = function(df, models, timepoint_name){
+	if(timepoint_name=="fullT1"){
+		time_suffix = "T1"
+	} else {
+		time_suffix = timepoint_name
+	}
+
+	### prepare tests
 	# create test grid
-	test_list = expand.grid(
-		model = models, 
-		mirna = mir_list, 
-		outcome = outcomes, 
-		subset = c("complete","Male","Female","NGT","GDM"),
-		stringsAsFactors = FALSE
-	)
+	test_list = CJ(model=models, mirna=paste0(mir_list, "_", time_suffix), 
+		outcome=names(outcome_labels), subset=subset_list)
 
 	# Exclusion
-	test_list = subset(test_list, !(outcome=="sex" & subset %in% c("Male","Female")))
 	test_list = subset(test_list, !(grepl("\\*sex", model) & subset %in% c("Male","Female")))
 	test_list = subset(test_list, !(outcome=="GDM" & subset %in% c("GDM","NGT")))
 	test_list = subset(test_list, !(grepl("\\*GDM", model) & subset %in% c("GDM","NGT")))
 	test_list = subset(test_list, !(grepl("\\*GDM", model) & outcome == "GDM"))
-	test_list = subset(test_list, !(grepl("\\*sex", model) & outcome == "sex"))
 	cat(" * Test to perform:", nrow(test_list), "\n")
 	
-	# Initialise rapport
-	report = as.data.frame(matrix(NA, nrow=nrow(test_list), ncol=10))
-	colnames(report) = c("miR","outcome","model","subset","nb","beta","se","pvalue","lowerCI","upperCI")
-	# for loop tests
+	# create empty report
+	report = data.table(miR = as.character(test_list$mirna),outcome = as.character(test_list$outcome),
+		model = as.character(test_list$model),subset = as.character(test_list$subset),
+		nb = NA_real_, beta = NA_real_, se = NA_real_, 
+		pvalue = NA_real_, lowerCI = NA_real_, upperCI = NA_real_)
+
+	### prepare dataset
+	# included samples from tested dataset
+	dt = dt[ID %in% sample_list]
+	dt = dt[!is.na(matsuda)]
+	cat(" * n=", nrow(dt), " at ",timepoint_name, "\n")
+	
+	# z-score all continuous variables
+	for (var in c(continuous_var_list, paste0(mir_list, "_", time_suffix))){
+		dt[, (var) := as.numeric(scale(as.numeric(get(var))))]
+		dt[abs(get(var)) > 4, (var) := NA]
+	}
+	### run tests
 	for (i in 1:nrow(test_list)){
-		mir = test_list[i, "mirna"]
-		model = test_list[i, "model"]
-		outcome = test_list[i, "outcome"]
-		subset_name = test_list[i, "subset"]
-		
-		# filter by strata
-		result = get_subset(df, subset_name, outcome, model)
-		data = result[[1]]
-		can_be_tested = result[[2]]
-		
-		if (!can_be_tested) next
+		cur_test = test_list[i]
+
+		sub_df = switch(cur_test$subset,
+		  "Male"   = dt[sex == 0],
+		  "Female" = dt[sex == 1],
+		  "NGT"    = dt[GDM == 0],
+		  "GDM"    = dt[GDM == 1],
+		  dt) # Default : pas de filtre (All)
 		
 		# run regression
-		if (outcome %in% dichotomic_outcomes){
-			stats = test_logistic_reg(data, outcome, model, mir)
-		} else {
-			stats = test_linear_reg(data, outcome, model, mir)
-		}
-		
-		report[i,] = c(mir, outcome, model, subset_name, stats)
+		stats = run_reg(sub_df, cur_test$outcome, cur_test$model, cur_test$mirna)
+		set(report, i, 5:10, as.list(stats))
 	}
-	
-	# clean and write
-	report = na.omit(report)
 	write.table(report, file=paste0(outdir,"/", timepoint_name, "_associations.tsv"), 
 		sep="\t", row.names=FALSE, quote=FALSE)
 	
+
+	pdf(paste0(outdir,"/boxplots.",timepoint_name,".pdf"), height=3.5, width=7)
+	plots = lapply(mir_list, function(mir){
+				create_boxplot(dt, mir, timepoint_name)})
+	combined_plot = ggarrange(plotlist=plots, nrow=1, ncol=4, common.legend=TRUE, legend="bottom")
+	print(annotate_figure(combined_plot, 
+			top=text_grob(timepoint_labels[timepoint_name], face="bold", size=16)))
+	dev.off()
+
+	report$timepoint = timepoint_name
+	report = report[!is.na(pvalue)]
 	return(report)
 }
 
-# run logistic regression
-test_logistic_reg = function(df, outcome, model, mir){
-	fit = glm(as.formula(paste0('df[, outcome]', "~",'df[, mir] ', model)), data=df, family="binomial")
+run_reg = function(df, outcome, model_str, mir) {
+	formula = as.formula(paste(outcome, "~", mir, model_str))
 
-	if(grepl("\\*", model)){
-		return(extract_reg_interaction(fit, outcome))
-	} else {
-		return(extract_reg(fit, outcome))
+	fam = if(outcome %in% factor_var_list) "binomial" else "gaussian"
+	fit = glm(formula, data = df, family = fam)
+
+	sum_fit = summary(fit)$coefficients
+
+	idx = if(grepl("*", model_str, fixed=TRUE)) grep(":", rownames(sum_fit)) else 2 
+	if(length(idx) == 0) return(rep(NA, 6))
+
+	res = c(n = length(fit$fitted.values), beta = sum_fit[idx, 1], 
+		  se = sum_fit[idx, 2], p = sum_fit[idx, 4])
+	ci = confint.default(fit)[idx, ] # .default est beaucoup plus rapide pour data.table
+
+	final_stats = c(res[1], res[2:3], res[4], ci)
+	if(outcome %in% factor_var_list) {
+		final_stats[c(2,3,5,6)] = exp(final_stats[c(2,3,5,6)])
 	}
+
+	return(c(final_stats[1], round(final_stats[2:3], 3), 
+		   format(signif(final_stats[4], 3), scientific = T), 
+		   round(final_stats[5:6], 3)))
 }
 
-# run linear regression
-test_linear_reg = function(df, outcome, model, mir){
-	fit = lm(as.formula(paste0('df[, outcome]', "~",'df[, mir] ', model)), data=df)
+create_forest_plot = function(df, outcome_name) {
+	is_dichotomic = outcome_name %in% factor_var_list
 
-	if(grepl("\\*", model)){
-		return(extract_reg_interaction(fit, outcome))
-	} else {
-		return(extract_reg(fit, outcome))
-	}
-}
+	ref_line = if(is_dichotomic) 1 else 0
+	ymin     = if(is_dichotomic) 0 else -1
+	ymax     = if(is_dichotomic) 2 else 1
+	ylab     = if(is_dichotomic) "OR" else "Beta"
 
-# Extract stats from model without interaction
-extract_reg = function(fit, outcome){
-	nb = length(fit$fitted.values)
-	complete_fit = summary(fit)
-
-	beta = complete_fit$coefficients[2,1]
-	se = complete_fit$coefficients[2,2]
-	pvalue = format(signif(complete_fit$coefficients[2,4], 3), scientific = T)
-	lower = confint(fit)[2, 1]
-	upper = confint(fit)[2, 2]
-
-	# Exp for dichotomic outcomes
-	if (outcome %in% dichotomic_outcomes){
-		return(c(nb, 
-			round(exp(beta), 3), 
-			round(exp(se), 3),
-			pvalue,
-			round(exp(lower), 3),
-			round(exp(upper), 3)))
-	} else {
-		return(c(nb,
-		    round(beta, 3), 
-		    round(se, 3), 
-		    pvalue,
-		    round(lower, 3), 
-		    round(upper, 3)))
-	}
-}
-
-# Extract stats from model with interaction
-extract_reg_interaction = function(fit, outcome){
-	nb = length(fit$fitted.values)
-	complete_fit = summary(fit)
-	
-	results = data.frame(complete_fit$coefficients)
-	idx_row = grep(":", rownames(results)) # interaction term	
-
-	beta = complete_fit$coefficients[idx_row, 1]
-	se = complete_fit$coefficients[idx_row, 2]
-	pvalue = format(signif(complete_fit$coefficients[idx_row, 4], 3), scientific = T)
-	lower = confint(fit)[idx_row, 1]
-	upper = confint(fit)[idx_row, 2]
-	
-	# Exp for dichotomic outcomes
-	if (outcome %in% dichotomic_outcomes){
-		return(c(nb, 
-			round(exp(beta), 3), 
-			round(exp(se), 3),
-			pvalue,
-			round(exp(lower), 3),
-			round(exp(upper), 3)))
-	} else {
-		return(c(nb,
-		    round(beta, 3), 
-		    round(se, 3), 
-		    pvalue,
-		    round(lower, 3), 
-		    round(upper, 3)))
-	}
-}
-
-
-
-create_forest_plot = function(df, outcome_name, dataset){
-	ref_line = ifelse(outcome_name %in% dichotomic_outcomes, 1, 0)
-	ymin = ifelse(outcome_name %in% dichotomic_outcomes, 0, -1)
-	ymax = ifelse(outcome_name %in% dichotomic_outcomes, 2, 1)
-	ylab = ifelse(outcome_name %in% dichotomic_outcomes, "OR", "Beta")
-
-	if (outcome_name %in% dichotomic_outcomes){
-		shape_values = if(outcome_name == "sex") {
-			c(4, 5, 15)
+	if (is_dichotomic) {
+		if (outcome_name == "GDM") {
+		  shape_values = c("Male" = 2, "Female" = 1, "complete" = 15)
 		} else {
-			c(2, 1, 15)
-		}
-		names(shape_values) = if(outcome_name == "sex") {
-			c("GDM", "NGT","complete")
-		} else {
-			c("Male", "Female","complete")
+		  shape_values = c("GDM" = 4, "NGT" = 5, "complete" = 15)
 		}
 	} else {
-		shape_values = c(4,5,2,1,15)
-		names(shape_values) = subset_order
+		shape_values = setNames(c(4, 5, 2, 1, 15), subset_order)
 	}
 	plots = list()
-	for (timepoint_name in timepoint_list){
-		subdf = subset(df, timepoint == timepoint_name)
-		subdf$signif = factor(subdf$signif, levels = c("", "*", "**", "***"))
+
+	for (timepoint_name in names(timepoint_labels)) {
+		subdf = df[timepoint == timepoint_name]
 		plots[[timepoint_name]] = ggplot(data=subdf, aes(x=subset, y=as.numeric(beta))) + 
 			geom_point(size=2, aes(shape=subset, color=signif)) +
 			facet_wrap(~miR, strip.position="left", nrow=9) + 
@@ -382,18 +302,30 @@ create_forest_plot = function(df, outcome_name, dataset){
 			theme(legend.position="none", axis.text.y=element_blank(), axis.ticks.y=element_blank(), axis.ticks.x=element_blank(), axis.text.x=element_text(face="bold"), axis.title=element_text(size=12,face="bold"), strip.text.y = element_text(hjust=0, vjust=1, angle=180, face="bold"),  panel.grid.major.y=element_blank(), panel.grid.minor.y=element_blank()) + 
 			coord_flip() +
 			geom_vline(xintercept=c(2.5, 4.5), linetype=3) +
-			scale_colour_manual(values=c("grey75","grey30","grey20","black")) + 
+			scale_colour_manual(values=c("grey75","black")) + 
 			scale_shape_manual(values=shape_values) + 
-			ggtitle(timepoint_name)
+			ggtitle(timepoint_labels[timepoint_name])	
 	}
 	return(plots)
 }
 
+create_boxplot = function(dt, mir_name, timepoint_name){
+	
+	subgroup_list = c("NGT_M", "GDM_M","NGT_F", "GDM_F")
+	dt[, `:=`(sex_factor = ifelse(sex==0, "M", "F"),
+			GDM_factor = ifelse(GDM==0,"NGT","GDM"))]
+	dt[, group := factor(paste0(GDM_factor, "_", sex_factor),levels=subgroup_list)]
 
-create_boxplot = function(df, mir_name){
+	if(timepoint_name=="fullT1"){
+		time_suffix = "T1"
+	} else {
+		time_suffix = timepoint_name
+	}
+
+	mir_fullname = paste0(mir_name, "_", time_suffix)
 	colour_values = c("#0088aa", "#3caaff", "#ff5555", "#ff8080")
-	names(colour_values) = c("NGT_M", "GDM_M","NGT_F", "GDM_F")
-	p = ggplot(df, aes(x=group, y=.data[[mir_name]], group=group, color=group)) +
+	names(colour_values) = subgroup_list
+	p = ggplot(dt, aes(x=group, y=.data[[mir_fullname]], group=group, color=group)) +
 		 geom_boxplot(outlier.shape=NA) +
 		 geom_jitter(aes(shape=sex_factor), width=0.2) + 
 		 stat_summary(fun=mean, geom="point", shape=3, size=3, color="black") + 

@@ -1,12 +1,11 @@
 ### Matsuda index and Placental miRNA 
 # 		measured in plasma at first (T1) 
 #			and second (T2) trimester of pregnancy  
-
 ### by F. White
 
-# Usage: Rscript test_associations_from_supp <outdir> 
+# Usage: Rscript test_associations_from_supp.R <outdir> 
 
-# The script use the published file from supplementary
+# This script is using the published file from supplementary material
 # 	to replicate the study results.
 
 library(data.table)
@@ -17,19 +16,43 @@ library(ggpubr)
 #======================================
 args = commandArgs(trailingOnly=TRUE)
 outdir = args[1]
+if (!dir.exists(outdir)) dir.create(outdir)
 
-input_file = "data/NIH miRNA project - Raw data.tsv"
+input_file = "data/supp_table_raw_data.tsv"
 
-data = fread(input_file, skip = 1)
-data = data[, c(1:5, 14:17, 18:27)]
+data = fread(input_file)[,-2]
+colnames(data)[1] = "ID"
+
+#======================================
+### Global variables
+#======================================
+if(!exists("test_associations", mode="function")) source("Functions.R")
+
+mir_list = c("miR.517a.3p","miR.524.5p","miR.1283","let.7b.3p")
+
+continuous_var_list = c("BMI_T1","GA_T1","matsuda","insulin_cordblood",
+	"cpeptide_cordblood","birthweight","placental_weight")
+factor_var_list = c("hemolysis","sex","GDM")
+
+# trimester suffix
+T1_suffix = "seq"
+T2_suffix = "normalized"
+timepoint_labels = c(T1="T1", T2="T2")
+
+subset_list = c("complete","Female","Male","NGT","GDM")
+subset_order = c("GDM","NGT","Male","Female","complete")
+
+outcome_labels = c(GDM="GDM", matsuda="Matsuda index",
+	insulin_cordblood = "Insulin (cord blood)", cpeptide_cordblood="C-peptide (cord blood)",
+	birthweight="Birthweight", placental_weight="Placental weight")
 
 #======================================
 ### Functions
 #======================================
-run_association_tests_V2 = function(dt, models, timepoint_name){
+test_associations2 = function(dt, models, timepoint_name){
 	# create test grid
 	test_list = CJ(model=models, mirna=paste0(mir_list, "_", timepoint_name), 
-		outcome=outcome_list, subset=subset_list)
+		outcome=names(outcome_labels), subset=subset_list)
 
 	# Exclusion
 	test_list = subset(test_list, !(grepl("\\*sex", model) & subset %in% c("Male","Female")))
@@ -43,6 +66,14 @@ run_association_tests_V2 = function(dt, models, timepoint_name){
 		model = as.character(test_list$model),subset = as.character(test_list$subset),
 		nb = NA_real_, beta = NA_real_, se = NA_real_, 
 		pvalue = NA_real_, lowerCI = NA_real_, upperCI = NA_real_)
+
+	# exclude samples without sequencing data at T1
+	if(timepoint_name == "T1") dt = dt[!is.na(get(paste0(mir_list[1],"_T1")))]
+	cat(" * n=",nrow(dt), " at ",timepoint_name, "\n")
+	# z-score all continuous variables
+	for (var in c(continuous_var_list, paste0(mir_list, "_", timepoint_name))){
+		dt[, (var) := as.numeric(scale(as.numeric(get(var))))]
+	}
 
 	for (i in 1:nrow(test_list)){
 		cur_test = test_list[i]
@@ -58,13 +89,18 @@ run_association_tests_V2 = function(dt, models, timepoint_name){
 		stats = run_reg(sub_df, cur_test$outcome, cur_test$model, cur_test$mirna)
 		set(report, i, 5:10, as.list(stats))
 	}
-	return(report[!is.na(pvalue)])
+	report = report[!is.na(pvalue)]
+	write.table(report, file=paste0(outdir,"/", timepoint_name, "_associations.tsv"), 
+		sep="\t", row.names=FALSE, quote=FALSE)
+
+	report$timepoint = timepoint_name
+	return(report)
 }
 
-run_reg = function(df, outcome, model_str, mir) {
+run_reg2 = function(df, outcome, model_str, mir) {
 	formula = as.formula(paste(outcome, "~", mir, model_str))
 
-	fam = if(outcome %in% dichotomic_outcomes) "binomial" else "gaussian"
+	fam = if(outcome %in% factor_var_list) "binomial" else "gaussian"
 	fit = glm(formula, data = df, family = fam)
 
 	sum_fit = summary(fit)$coefficients
@@ -77,8 +113,8 @@ run_reg = function(df, outcome, model_str, mir) {
 	ci = confint.default(fit)[idx, ] # .default est beaucoup plus rapide pour data.table
 
 	final_stats = c(res[1], res[2:3], res[4], ci)
-	if(outcome %in% dichotomic_outcomes) {
-	final_stats[c(2,3,5,6)] = exp(final_stats[c(2,3,5,6)])
+	if(outcome %in% factor_var_list) {
+		final_stats[c(2,3,5,6)] = exp(final_stats[c(2,3,5,6)])
 	}
 
 	return(c(final_stats[1], round(final_stats[2:3], 3), 
@@ -86,8 +122,8 @@ run_reg = function(df, outcome, model_str, mir) {
 		   round(final_stats[5:6], 3)))
 }
 
-create_forest_plot = function(df, outcome_name) {
-	is_dichotomic = outcome_name %in% dichotomic_outcomes
+create_forest_plot2 = function(df, outcome_name) {
+	is_dichotomic = outcome_name %in% factor_var_list
 
 	ref_line = if(is_dichotomic) 1 else 0
 	ymin     = if(is_dichotomic) 0 else -1
@@ -95,10 +131,10 @@ create_forest_plot = function(df, outcome_name) {
 	ylab     = if(is_dichotomic) "OR" else "Beta"
 
 	if (is_dichotomic) {
-		if (outcome_name == "sex") {
-		  shape_values = c("GDM" = 4, "NGT" = 5, "complete" = 15)
-		} else {
+		if (outcome_name == "GDM") {
 		  shape_values = c("Male" = 2, "Female" = 1, "complete" = 15)
+		} else {
+		  shape_values = c("GDM" = 4, "NGT" = 5, "complete" = 15)
 		}
 	} else {
 		shape_values = setNames(c(4, 5, 2, 1, 15), subset_order)
@@ -127,106 +163,94 @@ create_forest_plot = function(df, outcome_name) {
 	return(plots)
 }
 
-
-#======================================
-### Global variables
-#======================================
-
-mir_list = c("miR.517a.3p","miR.524.5p","miR.1283","let.7b.3p")
-
-outcome_list = c("GDM", "matsuda", "birthweight", "placental_weight", "insulin_delivery", "c_peptide_delivery")
-dichotomic_outcomes = c("GDM", "sex")
-
-subset_list = c("complete","Female","Male","NGT","GDM")
-subset_order = c("GDM","NGT","Male","Female","complete")
-
-timepoint_list = c("T1", "T2")
+create_boxplot2 = function(df, mir_name, timepoint_name){
+	mir_name = paste0(mir_name, "_", timepoint_name)
+	colour_values = c("#0088aa", "#3caaff", "#ff5555", "#ff8080")
+	names(colour_values) = subgroup_list
+	p = ggplot(df, aes(x=group, y=.data[[mir_name]], group=group, color=group)) +
+		 geom_boxplot(outlier.shape=NA) +
+		 geom_jitter(aes(shape=sex_factor), width=0.2) + 
+		 stat_summary(fun=mean, geom="point", shape=3, size=3, color="black") + 
+		 xlab("") + ylab(gsub("\\.", "-", mir_name)) + 
+		 theme_light() +
+		 theme(legend.position="none", axis.text.x=element_blank(), axis.ticks.x=element_blank()) +
+		 ylim(-3, 3) +
+		 scale_colour_manual(values=colour_values)
+	return(p)
+}
 
 #======================================
 ### Preprocessing
 #======================================
-setnames(data, c("GEO", paste0(mir_list, "_T2"), paste0(mir_list, "_T1"),
-				 "hemolysis", "GA_V1", "BMI_V1", "sex", "GDM",
-				 "matsuda", "birthweight", "placental_weight",
-				 "insulin_delivery", "c_peptide_delivery"))
+included_cols = c(
+  "ID",
+  paste0(T2_suffix, "_", mir_list),
+  paste0(T1_suffix, "_", mir_list),
+  factor_var_list,
+  continuous_var_list)
 
-list_log2 = c("BMI_V1","matsuda","insulin_delivery")
-list_sqrt = c("placental_weight","c_peptide_delivery")
+data = data[, ..included_cols]
 
-for (var in outcome_list[-1]){
-	# transformation
+setnames(data, c(
+	"ID", 
+	paste0(mir_list, "_T2"),
+	paste0(mir_list, "_T1"),
+  factor_var_list,
+  continuous_var_list))
+
+
+# transformation
+list_log2 = c("BMI_T1","matsuda","insulin_cordblood")
+list_sqrt = c("placental_weight","cpeptide_cordblood", paste0(mir_list, "_T2"))
+for (var in continuous_var_list){
 	if (var %in% list_log2) data[, (var) := log2(as.numeric(get(var)))]
 	if (var %in% list_sqrt) data[, (var) := sqrt(as.numeric(get(var)))]
-
-	# z-score
-	data[, (var) := as.numeric(scale(get(var)))]
-
-	# remove outliers
-	data[abs(get(var)) > 4, (var) := NA]
 }
 
-for (mir in mir_list){
-
-	# T1 : z-score
-	m_t1 = paste0(mir, "_T1")
-	data[, (m_t1) := as.numeric(scale(as.numeric(get(m_t1))))]
-
-	# T2 : z-score + remove outliers
-	m_t2 = paste0(mir, "_T2")
-	data[, (m_t2) := as.numeric(scale(sqrt(as.numeric(get(m_t2)))))]
-	data[abs(get(m_t2)) > 4, (m_t2) := NA]
-}
-data = data[!is.na(matsuda)]
-write.table(data, file=paste0(outdir, "/processed_input.tsv"), sep="\t", row.names=F, quote=F)
+for( var in factor_var_list) data[, (var) := factor(get(var))]
+write.table(data, file=paste0(outdir, "/data.tsv"), sep="\t", row.names=F, quote=F)
 
 #======================================
 # Test associations
 #======================================
-
-cat("\n=== Testing T1 ===\n")
-T1_models = c("+BMI_V1+GA_V1","*sex+BMI_V1+GA_V1", "*GDM+BMI_V1+GA_V1")
-T1_report = run_association_tests_V2(data, T1_models, "T1")
-write.table(T1_report, file=paste0(outdir,"/", "T1", "_associations.tsv"), 
+cat("\n=== Testing T2 ===\n")
+T2_models = c("+hemolysis+BMI_T1","*sex+hemolysis+BMI_T1", "*GDM+hemolysis+BMI_T1")
+T2_report = test_associations(data, T2_models, "T2", data$ID)
+write.table(T2_report, file=paste0(outdir,"/", "T2", "_associations.tsv"), 
 		sep="\t", row.names=FALSE, quote=FALSE)
 
-cat("\n=== Testing T2 ===\n")
-T2_models = c("+hemolysis+BMI_V1","*sex+hemolysis+BMI_V1", "*GDM+hemolysis+BMI_V1")
-T2_report = run_association_tests_V2(data, T2_models, "T2")
 
+cat("\n=== Testing T1 ===\n")
+T1_models = c("+BMI_T1+GA_T1","*sex+BMI_T1+GA_T1", "*GDM+BMI_T1+GA_T1")
+overlap_id = data[!is.na(get(paste0(mir_list[1], "_T1")))]$ID
+T1_report = test_associations(data, T1_models, "T1", overlap_id)
 
 #======================================
 ### Forest plots
 #======================================
 cat("\n=== Producing forest plots ===\n")
 
-outcome_labels = c(sex="Sex", GDM="GDM", matsuda="Matsuda index",
-	birthweight="Birthweight", placental_weight="Placental weight",
-	insulin_delivery = "Insulin (cord blood)", c_peptide_delivery="C-peptide (cord blood)")
-
-T1_report$timepoint = "T1"
-T2_report$timepoint = "T2"
-all_data = rbindlist(list(T1_report, T2_report))
+all_results = rbindlist(list(T1_report, T2_report))
 cols_to_num = c("beta", "lowerCI", "upperCI", "se", "pvalue")
-all_data[, (cols_to_num) := lapply(.SD, as.numeric), .SDcols = cols_to_num]
+all_results[, (cols_to_num) := lapply(.SD, as.numeric), .SDcols = cols_to_num]
 
-all_data[, miR := gsub("_T1$|_T2$", "", miR)]
-all_data[, `:=`(miR = factor(miR, levels = mir_list),
-  				timepoint = factor(timepoint, levels = timepoint_list),
+all_results[, miR := gsub("_T1$|_T2$", "", miR)]
+all_results[, `:=`(miR = factor(miR, levels = mir_list),
+  				timepoint = factor(timepoint, levels = names(timepoint_labels)),
   				subset = factor(subset, levels = subset_order))]
 
-all_data = all_data[model %in% c("+BMI_V1+GA_V1", "+hemolysis+BMI_V1")]
+all_results = all_results[model %in% c("+BMI_T1+GA_T1", "+hemolysis+BMI_T1")]
 
-all_data[, signif := fcase(
+all_results[, signif := fcase(
   pvalue < 0.05,  "*",
   default = "NS"
 )]
-all_data[, signif := factor(signif, levels = c("NS", "*"))]
+all_results[, signif := factor(signif, levels = c("NS", "*"))]
 
 pdf(paste0(outdir, "/forest_plots.pdf"), height = 6, width = 5)
-for (outcome_name in outcome_list) {
-	df_sub = all_data[outcome == outcome_name]
+for (outcome_name in names(outcome_labels)) {
+	df_sub = all_results[outcome == outcome_name]
 	if (nrow(df_sub) == 0) next
-
 	plots = create_forest_plot(df_sub, outcome_name)
 
 	combined_plot = ggarrange(plotlist=plots, nrow=1, ncol=2, common.legend=TRUE, legend="bottom")
@@ -235,3 +259,6 @@ for (outcome_name in outcome_list) {
 		top=text_grob(outcome_labels[outcome_name], face="bold", size=16)))
 }
 dev.off()
+
+
+
