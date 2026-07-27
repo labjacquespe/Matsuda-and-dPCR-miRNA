@@ -17,5 +17,5 @@ Rscript process_seq_data.R
 ### Run all associations and produce forestplots and boxplots.
 
 ```bash
-Rscript test_associations.R <outdir>
+Rscript associations.R <outdir>
 ```
