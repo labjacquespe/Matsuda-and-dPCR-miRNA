@@ -19,3 +19,10 @@ Rscript process_seq_data.R
 ```bash
 Rscript associations.R <outdir>
 ```
+
+### Replication
+To reproduce results from the paper using the supplementary table:
+
+```bash
+Rscript test_associations_from_supp.R <outdir>
+```
